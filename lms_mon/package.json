@@ -1,0 +1,23 @@
+{
+  "name": "lms_mon",
+  "version": "1.0.0",
+  "description": "",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "ecosystem.config.js",
+  "scripts": {
+    "start:dev": "cross-env NODE_ENV=dev pm2 start ecosystem.config.js",
+    "start:prod": "cross-env NODE_ENV=prod pm2 start ecosystem.config.js",
+
+    "restart:dev": "cross-env NODE_ENV=dev pm2 restart ecosystem.config.js",
+    "restart:prod": "cross-env NODE_ENV=prod pm2 restart ecosystem.config.js",
+
+    "stop": "pm2 stop LMS",
+    "delete": "pm2 delete LMS",
+    "logs": "pm2 logs"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0"
+  }
+}
