@@ -27,6 +27,7 @@ INTERVAL = 1
 
 SCALER_PATH = f"../model/{COL}/scaler.pkl"
 
+DRIVER = os.getenv("DRIVER")
 SERVER = os.getenv("SERVER")
 PORT = os.getenv("PORT")
 DATABASE = os.getenv("DATABASE")
@@ -34,7 +35,7 @@ USERNAME = os.getenv("USERNAME")
 PASSWORD = os.getenv("PASSWORD")
 
 conn_str = (
-    "DRIVER={ODBC Driver 18 for SQL Server};"
+    f"DRIVER={DRIVER};"
     f"SERVER={SERVER},{PORT};"
     f"DATABASE={DATABASE};"
     f"UID={USERNAME};"
@@ -44,20 +45,10 @@ conn_str = (
 
 conn = None
 
-# ==============================
-# 로그
-# ==============================
-
-
-def log(msg):
-    print(f"[{time.strftime('%Y/%m/%d %H:%M:%S')}] {msg}")
-
 
 # ==============================
 # DB
 # ==============================
-
-
 def get_conn():
     global conn
     if conn is None:
@@ -98,8 +89,6 @@ def exec_query(query, params=None, fetch=False):
 # ==============================
 # 타입 변환 (안정)
 # ==============================
-
-
 def to_py(v):
     if isinstance(v, (np.integer,)):
         return int(v)
@@ -111,10 +100,15 @@ def to_py(v):
 
 
 # ==============================
-# MAIN
+# 스케일러 로드
 # ==============================
-
 scaler = joblib.load(SCALER_PATH)
+
+print("스케일러 로드 완료")
+
+# ==============================
+# 메인 루프
+# ==============================
 last_id = None
 
 print(f"{COL} 모니터링 시작")
@@ -125,22 +119,22 @@ while True:
         # =========================
         # last_id 조회
         # =========================
-        print("마지막 lms_id 조회")
-
-        rows, _ = exec_query(
-            """
-            SELECT TOP 1 lms_id
-            FROM spike_event WITH (NOLOCK)
-            ORDER BY id DESC
-        """,
-            fetch=True,
-        )
-
-        print(f"마지막 lms_id 조회 완료: {rows[0][0] if rows else '없음'}")
-
-        if last_id is None and rows:
-            last_id = int(rows[0][0])
-
+        if last_id is None:
+            print("마지막 lms_id 조회")
+            rows, _ = exec_query(
+                """
+                    SELECT TOP 1 lms_id
+                    FROM spike_event WITH (NOLOCK)
+                    WHERE name = ?
+                    ORDER BY id DESC
+                """,
+                (COL,),
+                fetch=True,
+            )
+            
+            last_id = int(rows[0][0]) if rows else None
+        print(f"마지막 lms_id: {last_id or '없음'}")
+        
         # =========================
         # 데이터 조회
         # =========================
@@ -151,7 +145,8 @@ while True:
                 SELECT id, s001, {COL}
                 FROM lmsCurrent WITH (NOLOCK)
                 -- WHERE s001 >= CAST(GETDATE() AS DATE)
-                WHERE s001 >= '2026-04-16' AND s001 < '2026-04-17'
+                -- WHERE s001 >= '2026-04-16' AND s001 < '2026-04-17'
+                WHERE {COL} > 0
                 ORDER BY id ASC
             """
             params = None
@@ -159,7 +154,7 @@ while True:
             qry = f"""
                 SELECT id, s001, {COL}
                 FROM lmsCurrent WITH (NOLOCK)
-                WHERE id > ?
+                WHERE id > ? AND {COL} > 0
                 ORDER BY id ASC
             """
             params = (last_id,)
@@ -181,7 +176,7 @@ while True:
         # 스케일링
         # =========================
         print("스케일링 시작")
-        df["scaled"] = scaler.transform(df[[COL]])
+        df["scaled"] = scaler.transform(df[[COL]]).reshape(-1)
         print("스케일링 완료")
 
         # =========================
@@ -190,7 +185,7 @@ while True:
         print("스파이크 추출 시작")
 
         sequences, indices = extract_spike(
-            df["scaled"].values,
+            df["scaled"].values.reshape(-1),
             seq_len=SEQ_LEN,
             pre_offset=PRE_OFFSET,
             slope_factor=3.0,
@@ -247,13 +242,13 @@ while True:
             values_clause = ",".join(["(?, ?, ?)"] * len(batch))
 
             query = f"""
-            DECLARE @tmp TABLE (id INT);
+                DECLARE @tmp TABLE (id INT);
 
-            INSERT INTO spike_event (name, lms_id, s001)
-            OUTPUT INSERTED.id INTO @tmp
-            VALUES {values_clause};
+                INSERT INTO spike_event (name, lms_id, s001)
+                OUTPUT INSERTED.id INTO @tmp
+                VALUES {values_clause};
 
-            SELECT id FROM @tmp;
+                SELECT id FROM @tmp;
             """
 
             params = [v for row in batch for v in row]
