@@ -280,7 +280,7 @@ while True:
             cursor.fast_executemany = True
             cursor.executemany(
                 """
-                INSERT INTO spike_data (event_id, seq, value)
+                INSERT INTO spike_data (event_id, seq, actual_value)
                 VALUES (?, ?, ?)
             """,
                 data_rows,
